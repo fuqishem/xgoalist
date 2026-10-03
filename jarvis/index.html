@@ -173,6 +173,8 @@ function speak(text) {
 function reply(text) { say(text); return speak(text); }
 
 // ---------- Speech input ----------
+const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const STANDALONE = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, listening = false, pausedForSpeech = false, awake = false, awakeTimer = null;
 function startRec() {
@@ -194,7 +196,7 @@ function startRec() {
 function stopRec() { const r = rec; rec = null; if (r) { r.onend = null; try { r.abort(); } catch {} } }
 function afterSpeak() { setState(listening ? 'listen' : 'idle', listening ? (cfg.wake ? '"Jarvis" deyin' : 'dinliyorum') : 'hazır'); if (listening) startRec(); }
 function toggleMic() {
-  if (!SR) return say('Bu tarayıcı sesli komutu desteklemiyor. Android\'de Chrome veya masaüstünde Chrome/Edge kullanın; yazarak da konuşabilirsiniz.', 'sys');
+  if (!SR || (IOS && STANDALONE)) { $('#txt').focus(); return say('iPhone\'da bu modda mikrofon çalışmıyor. Açılan klavyedeki 🎙 (dikte) tuşuna basıp konuşun, sonra Gönder\'e dokunun. Hands-free için Siri Kısayolu kurabilirsiniz (README).', 'sys'); }
   listening = !listening; $('#mic').classList.toggle('on', listening);
   if (listening) { startRec(); } else { stopRec(); awake = false; setState('idle', 'hazır'); }
 }
@@ -379,6 +381,8 @@ $('#cSave').addEventListener('click', () => {
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
 setState('idle', 'hazır');
+// ?q=... ile açılırsa soruyu hemen işler (Siri Kısayolları için)
+{ const q = new URLSearchParams(location.search).get('q'); if (q) setTimeout(() => handle(q), 300); }
 { const h = new Date().getHours(); say(`${h < 12 ? 'Günaydın' : h < 18 ? 'İyi günler' : 'İyi akşamlar'} ${cfg.name}. Sistemler çevrimiçi. Mikrofon düğmesine ya da reaktöre dokunup "Jarvis" diyerek bana ulaşabilirsiniz.`); }
 if (cfg.prov !== 'none' && !cfg.key && cfg.prov !== 'custom') say('Sohbet için ⚙ ayarlardan ücretsiz bir API anahtarı ekleyin. Anahtarsız da yerel komutlar çalışır.', 'sys');
 </script>
