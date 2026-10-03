@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#02080d">
+<title>J.A.R.V.I.S.</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg">
+<style>
+  :root { --c:#3fe0ff; --c2:#0b7a94; --bg:#02080d; --warn:#ffb347; }
+  * { box-sizing:border-box; margin:0; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; background:var(--bg); color:var(--c); font-family:"Segoe UI",system-ui,sans-serif; overflow:hidden; }
+  body { display:flex; flex-direction:column; padding:env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+    background:radial-gradient(ellipse at 50% 35%, #06222d 0%, var(--bg) 65%); }
+  header { display:flex; justify-content:space-between; align-items:center; padding:12px 0; font-size:12px; letter-spacing:.25em; text-transform:uppercase; opacity:.85; }
+  #clock { font-variant-numeric:tabular-nums; font-size:20px; letter-spacing:.1em; }
+  #hud { flex:0 0 auto; display:flex; justify-content:center; }
+  canvas { width:min(62vw,40vh,360px); aspect-ratio:1; cursor:pointer; }
+  #state { text-align:center; font-size:12px; letter-spacing:.3em; text-transform:uppercase; opacity:.7; min-height:18px; }
+  #log { flex:1; overflow-y:auto; margin:10px 0; padding:8px 4px; display:flex; flex-direction:column; gap:8px; scrollbar-width:thin; scrollbar-color:var(--c2) transparent; }
+  .msg { max-width:88%; padding:8px 12px; border:1px solid var(--c2); border-radius:3px 14px 3px 14px; font-size:15px; line-height:1.4; background:#04141c99; white-space:pre-wrap; }
+  .msg.me { align-self:flex-end; border-color:#2b5360; color:#bfeaf5; border-radius:14px 3px 14px 3px; }
+  .msg.sys { align-self:center; border:none; background:none; font-size:12px; opacity:.6; }
+  form { display:flex; gap:8px; padding-bottom:10px; }
+  input,select,button { font:inherit; color:var(--c); background:#04141c; border:1px solid var(--c2); border-radius:4px; padding:10px 12px; }
+  input:focus,select:focus { outline:1px solid var(--c); }
+  form input { flex:1; min-width:0; }
+  button { cursor:pointer; text-transform:uppercase; letter-spacing:.12em; font-size:12px; }
+  button:active { background:var(--c2); }
+  #mic.on { background:var(--c); color:var(--bg); }
+  dialog { margin:auto; width:min(92vw,460px); background:#031018; color:var(--c); border:1px solid var(--c); border-radius:6px; padding:18px; }
+  dialog::backdrop { background:#000b; }
+  dialog h2 { font-size:14px; letter-spacing:.25em; margin-bottom:12px; }
+  dialog label { display:block; font-size:11px; letter-spacing:.15em; text-transform:uppercase; margin:12px 0 4px; opacity:.8; }
+  dialog input,dialog select { width:100%; }
+  dialog p { font-size:12px; opacity:.65; margin-top:6px; line-height:1.4; }
+  dialog a { color:var(--c); }
+  .row { display:flex; gap:8px; justify-content:flex-end; margin-top:16px; }
+</style>
+</head>
+<body>
+<header>
+  <span>J.A.R.V.I.S.</span><span id="clock">--:--:--</span>
+  <button id="cfgBtn" type="button" title="Ayarlar">⚙</button>
+</header>
+<div id="hud"><canvas id="reactor" width="720" height="720"></canvas></div>
+<div id="state">çevrimdışı</div>
+<div id="log" aria-live="polite"></div>
+<form id="form" autocomplete="off">
+  <button id="mic" type="button" title="Dinlemeyi aç/kapat">🎙</button>
+  <input id="txt" placeholder="Bir şey söyleyin ya da yazın…" enterkeyhint="send">
+  <button>Gönder</button>
+</form>
+
+<dialog id="cfg">
+  <h2>AYARLAR</h2>
+  <label>Size nasıl hitap edeyim</label>
+  <input id="cName" placeholder="efendim">
+  <label>Yapay zeka sağlayıcısı</label>
+  <select id="cProv">
+    <option value="gemini">Google Gemini (ücretsiz katman)</option>
+    <option value="groq">Groq (ücretsiz katman)</option>
+    <option value="custom">Özel / Ollama / OpenRouter (OpenAI uyumlu)</option>
+    <option value="none">Yok (yalnızca yerel komutlar)</option>
+  </select>
+  <label>API anahtarı</label>
+  <input id="cKey" type="password" placeholder="anahtar yalnızca bu cihazda saklanır">
+  <label>Model</label>
+  <input id="cModel">
+  <div id="baseWrap">
+    <label>Adres (base URL)</label>
+    <input id="cBase" placeholder="http://192.168.1.20:11434/v1">
+  </div>
+  <p id="provHelp"></p>
+  <label>Uyandırma kelimesi</label>
+  <select id="cWake"><option value="1">Açık: "Jarvis" deyince dinler</option><option value="0">Kapalı: her sözü komut sayar</option></select>
+  <label>Konuşma hızı</label>
+  <input id="cRate" type="range" min="0.7" max="1.4" step="0.05">
+  <div class="row"><button id="cClose" type="button">İptal</button><button id="cSave" type="button">Kaydet</button></div>
+</dialog>
+
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('jv_' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('jv_' + k, JSON.stringify(v)); } catch {} }
+};
+const PROVIDERS = {
+  gemini: { model: 'gemini-2.5-flash', help: 'Ücretsiz anahtar: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>' },
+  groq:   { model: 'llama-3.3-70b-versatile', base: 'https://api.groq.com/openai/v1', help: 'Ücretsiz anahtar: <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>' },
+  custom: { model: 'llama3.1', base: 'http://localhost:11434/v1', help: 'Evde Ollama çalıştırıyorsanız tamamen ücretsiz ve gizli. Telefondan erişim için bilgisayarınızın yerel IP\'sini yazın.' },
+  none:   { model: '', help: 'Saat, hava, zamanlayıcı, not, görev ve hesap gibi komutlar yapay zeka olmadan çalışır.' }
+};
+let cfg = Object.assign({ name: 'efendim', prov: 'gemini', key: '', model: '', base: '', wake: 1, rate: 1 }, store.get('cfg', {}));
+let notes = store.get('notes', []);
+let tasks = store.get('tasks', []);
+let history = store.get('hist', []);
+let timers = [];
+
+// ---------- UI ----------
+const log = $('#log');
+function say(text, cls = '') {
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls; d.textContent = text;
+  log.appendChild(d); log.scrollTop = log.scrollHeight;
+  while (log.children.length > 60) log.firstChild.remove();
+  return d;
+}
+function setState(s, label) { state = s; $('#state').textContent = label; }
+let state = 'idle';
+setInterval(() => { $('#clock').textContent = new Date().toLocaleTimeString('tr-TR'); }, 500);
+
+// ---------- Reactor animation ----------
+const cv = $('#reactor'), g = cv.getContext('2d'); let t = 0;
+function draw() {
+  t += 0.016;
+  const S = cv.width, C = S / 2;
+  const energy = { idle: 0.25, listen: 0.6, think: 0.9, speak: 1 }[state] || 0.25;
+  const spin = { idle: 0.15, listen: 0.35, think: 1.6, speak: 0.6 }[state] || 0.2;
+  const col = state === 'think' ? '255,179,71' : '63,224,255';
+  g.clearRect(0, 0, S, S);
+  const pulse = 1 + Math.sin(t * (2 + energy * 5)) * 0.04 * (0.5 + energy);
+  const glow = g.createRadialGradient(C, C, 0, C, C, C * 0.62 * pulse);
+  glow.addColorStop(0, `rgba(${col},${0.55 * energy + 0.15})`); glow.addColorStop(1, `rgba(${col},0)`);
+  g.fillStyle = glow; g.fillRect(0, 0, S, S);
+  g.strokeStyle = `rgba(${col},0.9)`; g.lineCap = 'round';
+  const ring = (r, w, dash, dir, a) => {
+    g.save(); g.translate(C, C); g.rotate(t * spin * dir); g.lineWidth = w; g.globalAlpha = a;
+    g.setLineDash(dash); g.beginPath(); g.arc(0, 0, r, 0, 7); g.stroke(); g.restore();
+  };
+  ring(C * 0.92, 3, [4, 14], 1, 0.5);
+  ring(C * 0.82, 6, [120, 40, 30, 40], -1.3, 0.8);
+  ring(C * 0.68, 2, [], 1, 0.6);
+  ring(C * 0.58, 10, [22, 12], 2, 0.9);
+  g.save(); g.translate(C, C); g.globalAlpha = 0.9; g.lineWidth = 7;
+  const n = 10;
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * 6.283 + t * spin * 0.5;
+    const wob = state === 'speak' ? Math.abs(Math.sin(t * 9 + i * 1.7)) * 0.1 : 0;
+    const r1 = C * 0.28, r2 = C * (0.36 + wob);
+    g.beginPath(); g.moveTo(Math.cos(a) * r1, Math.sin(a) * r1); g.lineTo(Math.cos(a) * r2, Math.sin(a) * r2); g.stroke();
+  }
+  g.restore();
+  g.fillStyle = `rgba(${col},${0.5 + 0.4 * energy})`; g.beginPath(); g.arc(C, C, C * 0.17 * pulse, 0, 7); g.fill();
+  requestAnimationFrame(draw);
+}
+draw();
+
+// ---------- Speech output ----------
+const synth = window.speechSynthesis; let trVoice = null;
+function pickVoice() {
+  if (!synth) return;
+  const v = synth.getVoices().filter(x => /^tr/i.test(x.lang));
+  trVoice = v.find(x => /male|erkek|cem/i.test(x.name)) || v.find(x => !/female|kad[ıi]n|yelda/i.test(x.name)) || v[0] || null;
+}
+if (synth) { pickVoice(); synth.onvoiceschanged = pickVoice; }
+function speak(text) {
+  return new Promise(res => {
+    if (!synth) return res();
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text.replace(/[*_`#]/g, ''));
+    u.lang = 'tr-TR'; if (trVoice) u.voice = trVoice;
+    u.rate = cfg.rate; u.pitch = 0.85;
+    const done = () => res();
+    u.onend = done; u.onerror = done;
+    setState('speak', 'konuşuyor');
+    pausedForSpeech = true; stopRec();
+    synth.speak(u);
+  }).then(() => { pausedForSpeech = false; afterSpeak(); });
+}
+function reply(text) { say(text); return speak(text); }
+
+// ---------- Speech input ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false, pausedForSpeech = false, awake = false, awakeTimer = null;
+function startRec() {
+  if (!SR || rec || pausedForSpeech) return;
+  rec = new SR(); rec.lang = 'tr-TR'; rec.continuous = true; rec.interimResults = false;
+  rec.onresult = e => {
+    for (let i = e.resultIndex; i < e.results.length; i++)
+      if (e.results[i].isFinal) heard(e.results[i][0].transcript.trim());
+  };
+  rec.onend = () => { rec = null; if (listening && !pausedForSpeech) setTimeout(startRec, 250); };
+  rec.onerror = ev => {
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      listening = false; $('#mic').classList.remove('on');
+      say('Mikrofon izni verilmedi. Tarayıcı ayarlarından izin verin.', 'sys');
+    }
+  };
+  try { rec.start(); if (state === 'idle') setState('listen', cfg.wake ? '"Jarvis" deyin' : 'dinliyorum'); } catch { rec = null; }
+}
+function stopRec() { const r = rec; rec = null; if (r) { r.onend = null; try { r.abort(); } catch {} } }
+function afterSpeak() { setState(listening ? 'listen' : 'idle', listening ? (cfg.wake ? '"Jarvis" deyin' : 'dinliyorum') : 'hazır'); if (listening) startRec(); }
+function toggleMic() {
+  if (!SR) return say('Bu tarayıcı sesli komutu desteklemiyor. Android\'de Chrome veya masaüstünde Chrome/Edge kullanın; yazarak da konuşabilirsiniz.', 'sys');
+  listening = !listening; $('#mic').classList.toggle('on', listening);
+  if (listening) { startRec(); } else { stopRec(); awake = false; setState('idle', 'hazır'); }
+}
+const WAKE = /\b(jarvis|jarvıs|carvis|jarvi[sş]|çarvis|jarviz)\b[\s,.!]*/i;
+function heard(raw) {
+  if (!raw) return;
+  if (cfg.wake) {
+    const m = raw.match(WAKE);
+    if (m) { awake = true; clearTimeout(awakeTimer); awakeTimer = setTimeout(() => awake = false, 8000); raw = raw.replace(WAKE, '').trim(); if (!raw) { return reply('Sizi dinliyorum, ' + cfg.name + '.'); } }
+    else if (!awake) return;
+    awake = false;
+  }
+  handle(raw);
+}
+
+// ---------- Local skills ----------
+const tr = s => s.toLocaleLowerCase('tr-TR');
+const NUM = { sıfır:0, bir:1, iki:2, üç:3, dört:4, beş:5, altı:6, yedi:7, sekiz:8, dokuz:9, on:10, onbeş:15, yirmi:20, otuz:30, kırk:40, elli:50, altmış:60, yetmiş:70, seksen:80, doksan:90, yüz:100 };
+function numWords(s) { return s.replace(/\b[a-zçğıöşü]+\b/g, w => (w in NUM ? NUM[w] : w)).replace(/\b(\d+)\s+(\d)\b/g, (m, a, b) => +a % 10 === 0 && +a >= 20 && +b < 10 ? +a + +b : m); }
+const spokenDur = ms => { const s = Math.round(ms / 1000); const m = Math.floor(s / 60); return m ? `${m} dakika${s % 60 ? ' ' + s % 60 + ' saniye' : ''}` : `${s} saniye`; };
+const WMO = c => c === 0 ? 'açık' : c <= 2 ? 'parçalı bulutlu' : c === 3 ? 'kapalı' : c <= 48 ? 'sisli' : c <= 57 ? 'çiseleyen yağmurlu' : c <= 67 ? 'yağmurlu' : c <= 77 ? 'karlı' : c <= 82 ? 'sağanak yağışlı' : c <= 86 ? 'kar sağanaklı' : 'fırtınalı';
+
+async function weather(q) {
+  let lat, lon, place = '';
+  const city = q.match(/(?:^|\s)([a-zçğıöşü]+?)(?:'|’)?\s*(?:da|de|ta|te)\s+(?:hava|bugün|yarın)/i) || q.match(/([a-zçğıöşü]+)\s+hava/i);
+  const skip = /^(bugün|yarın|şu|bu|dışarıda|hava|nasıl|acaba)$/i;
+  if (city && !skip.test(city[1])) {
+    const r = await (await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city[1])}&count=1&language=tr`)).json();
+    if (r.results?.[0]) ({ latitude: lat, longitude: lon, name: place } = r.results[0]);
+  }
+  if (lat == null) {
+    const p = await new Promise((ok, no) => navigator.geolocation ? navigator.geolocation.getCurrentPosition(ok, no, { timeout: 8000 }) : no());
+    lat = p.coords.latitude; lon = p.coords.longitude;
+  }
+  const w = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=2`)).json();
+  const c = w.current, d = w.daily, tom = /yarın/.test(q);
+  if (tom) return `${place ? place + ' için yarın' : 'Yarın'} en yüksek ${Math.round(d.temperature_2m_max[1])}, en düşük ${Math.round(d.temperature_2m_min[1])} derece. Yağış ihtimali yüzde ${d.precipitation_probability_max[1] ?? 0}.`;
+  return `${place ? place + ' için şu an' : 'Şu an'} hava ${WMO(c.weather_code)}, ${Math.round(c.temperature_2m)} derece, hissedilen ${Math.round(c.apparent_temperature)}. Bugün ${Math.round(d.temperature_2m_min[0])} ile ${Math.round(d.temperature_2m_max[0])} arası, yağış ihtimali yüzde ${d.precipitation_probability_max[0] ?? 0}.`;
+}
+
+function calc(q) {
+  let e = numWords(tr(q)).replace(/,/g, '.')
+    .replace(/çarpı|kere|x(?=\s*\d)/g, '*').replace(/bölü/g, '/').replace(/artı/g, '+').replace(/eksi/g, '-')
+    .replace(/üssü/g, '**').replace(/yüzde\s*(\d+(?:\.\d+)?)/g, '($1/100)');
+  e = e.replace(/[^0-9+\-*/().\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!/\d\s*[-+*/]+\s*\(?\d/.test(e) || !/^[\d+\-*/().\s]+$/.test(e)) return null;
+  try { const v = Function('"use strict";return (' + e + ')')(); return Number.isFinite(v) ? +v.toFixed(6) : null; } catch { return null; }
+}
+
+function setTimer(ms, label) {
+  const id = setTimeout(() => { timers = timers.filter(x => x.id !== id); reply(`${cfg.name}, ${label}`); try { navigator.vibrate?.([300, 150, 300]); } catch {} }, ms);
+  timers.push({ id, at: Date.now() + ms, label });
+}
+function parseDuration(q) {
+  q = numWords(q); let ms = 0, m;
+  if ((m = q.match(/(\d+(?:[.,]\d+)?)\s*saat/))) ms += parseFloat(m[1].replace(',', '.')) * 3600e3;
+  if (/buçuk/.test(q) && /saat/.test(q)) ms += 1800e3;
+  if ((m = q.match(/(\d+)\s*(?:dakika|dk)/))) ms += m[1] * 60e3;
+  if ((m = q.match(/(\d+)\s*(?:saniye|sn)/))) ms += m[1] * 1e3;
+  return ms;
+}
+const saveTasks = () => store.set('tasks', tasks);
+const JOKES = ['Bir yapay zekaya neden soğuk almazsın demişler. Çünkü penceresi hep kapalı, demiş.', 'Programcı neden doğada yürümeyi sevmez? Çünkü çok fazla bug var.', 'Efendim, size bir şaka yapardım ama son güncellemede mizah modülü ücretli plana geçti.'];
+
+// returns string reply, or null to defer to the LLM
+async function local(raw) {
+  const q = tr(raw).replace(/[?!.]+$/g, '').trim(); let m;
+  if (/(saat kaç|saati söyle|kaç saat)/.test(q) && !/dakika|saniye/.test(q)) return 'Saat ' + new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  if (/(bugün|tarih|günlerden|hangi gün)/.test(q) && /(ne|hangi|tarih|kaç)/.test(q) && !/hava/.test(q)) return 'Bugün ' + new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  if (/hava/.test(q) && /(nasıl|durum|derece|sıcak|soğuk|yağmur|kaç)/.test(q)) {
+    try { return await weather(q); } catch { return 'Hava durumuna ulaşamadım. Konum izni ya da internet bağlantısı eksik olabilir.'; }
+  }
+  if (/(zamanlayıcı|sayaç|alarm|hatırlat)/.test(q) && !/(not|görev)/.test(q) && !/(iptal|sil|kaç|listele)/.test(q)) {
+    const ms = parseDuration(q);
+    if (ms) {
+      const what = (raw.match(/(?:hatırlat(?:ır mısın)?|diye)\s+(.+)$/i) || [])[1];
+      setTimer(ms, what ? `hatırlatma: ${what}` : 'süre doldu.');
+      return `${spokenDur(ms)} için zamanlayıcı kuruldu.`;
+    }
+    return 'Ne kadar süre için kurayım? Örneğin: on dakika zamanlayıcı kur.';
+  }
+  if (/(zamanlayıcı|sayaç|alarm)/.test(q) && /(iptal|sil|durdur|kapat)/.test(q)) { timers.forEach(x => clearTimeout(x.id)); const n = timers.length; timers = []; return n ? 'Zamanlayıcılar iptal edildi.' : 'Aktif zamanlayıcı yok.'; }
+  if (/(zamanlayıcı|sayaç)/.test(q) && /(kaldı|kaç|listele)/.test(q)) return timers.length ? timers.map(x => `${spokenDur(x.at - Date.now())} kaldı`).join('. ') : 'Aktif zamanlayıcı yok.';
+  if ((m = raw.match(/^(?:şunu\s+)?not\s+(?:al|et|ekle)[:,]?\s*(.+)$/i) || raw.match(/^(.+?)\s+diye\s+not\s+(?:al|et)$/i))) { notes.push({ t: m[1], d: Date.now() }); store.set('notes', notes); return 'Not alındı.'; }
+  if (/(notlarım|notları (oku|listele|göster))/.test(q)) return notes.length ? notes.slice(-5).map((n, i) => `${i + 1}. ${n.t}`).join('\n') : 'Kayıtlı notunuz yok.';
+  if (/notları (sil|temizle)/.test(q)) { notes = []; store.set('notes', notes); return 'Tüm notlar silindi.'; }
+  if ((m = raw.match(/^(?:görev|hedef)\s+ekle[:,]?\s*(.+)$/i) || raw.match(/^(.+?)\s+(?:görevi|hedefi)\s+ekle$/i) || raw.match(/^(.+?)\s+diye\s+(?:bir\s+)?(?:görev|hedef)\s+ekle$/i))) { tasks.push({ t: m[1], done: false }); saveTasks(); return `Görev eklendi: ${m[1]}`; }
+  if (/(görevlerim|hedeflerim|yapılacaklar|görevleri (oku|listele|göster))/.test(q)) {
+    const open = tasks.filter(x => !x.done);
+    return open.length ? `${open.length} açık göreviniz var:\n` + open.map((x, i) => `${i + 1}. ${x.t}`).join('\n') : 'Açık göreviniz yok. Harika.';
+  }
+  if ((m = numWords(q).match(/(\d+)\.?\s*(?:görevi|hedefi)\s*(?:tamamla|bitir|yaptım)/))) {
+    const open = tasks.filter(x => !x.done), it = open[m[1] - 1];
+    if (!it) return 'Öyle bir görev bulamadım.'; it.done = true; saveTasks(); return `Tamamlandı: ${it.t}. Tebrikler.`;
+  }
+  if (/(tamamlanan|biten) (görevleri|hedefleri) (sil|temizle)/.test(q)) { tasks = tasks.filter(x => !x.done); saveTasks(); return 'Tamamlanan görevler temizlendi.'; }
+  if ((m = raw.match(/^(.+?)(?:'?(?:da|de|te|ta))?\s+(?:ara|arat)$/i)) && /(youtube|google|haritalar?)/i.test(q)) {
+    const w = tr(m[1]);
+    const term = raw.replace(/\b(youtube|google|haritalar|harita)\b.*$/i, '').trim() || m[1];
+    const url = /youtube/.test(w) ? 'https://www.youtube.com/results?search_query=' : /harita/.test(w) ? 'https://www.google.com/maps/search/' : 'https://www.google.com/search?q=';
+    window.open(url + encodeURIComponent(term), '_blank'); return `${term} için arama açıldı.`;
+  }
+  if ((m = q.match(/^(youtube|google|spotify|haritalar|gmail|takvim)(?:'?[ıiuü]?)?\s*(?:aç|başlat)/))) {
+    const u = { youtube: 'https://www.youtube.com', google: 'https://www.google.com', spotify: 'https://open.spotify.com', haritalar: 'https://maps.google.com', gmail: 'https://mail.google.com', takvim: 'https://calendar.google.com' }[m[1]];
+    window.open(u, '_blank'); return `${m[1]} açılıyor.`;
+  }
+  if (/(şaka|fıkra)/.test(q)) return JOKES[Math.floor(Math.random() * JOKES.length)];
+  if (/(ekranı|konuşmayı|sohbeti) (temizle|sil)/.test(q)) { log.innerHTML = ''; history = []; store.set('hist', history); return 'Ekran ve konuşma geçmişi temizlendi.'; }
+  if (/(teşekkür|sağ ol)/.test(q)) return `Rica ederim ${cfg.name}.`;
+  if (/^(merhaba|selam|günaydın|iyi akşamlar|naber)/.test(q)) { const h = new Date().getHours(); return `${h < 5 ? 'İyi geceler' : h < 12 ? 'Günaydın' : h < 18 ? 'İyi günler' : 'İyi akşamlar'} ${cfg.name}. Size nasıl yardımcı olabilirim?`; }
+  if (/(sen kimsin|kendini tanıt|adın ne)/.test(q)) return 'Ben Jarvis. Sizin kişisel asistanınız. Hava, zamanlayıcı, notlar, görevler ve sohbet konularında yardımcı olabilirim.';
+  if (/(neler yapabilirsin|yardım|komutlar)/.test(q) && q.length < 40) return 'Saati, havayı, zamanlayıcı, not ve görev işlerini, hesaplamayı, YouTube ve Google aramalarını yapabilirim. Gerisi için yapay zekaya sorarım.';
+  const c = calc(raw); if (c !== null && /\d/.test(raw) && !/[a-z]{6,}/i.test(raw.replace(/çarpı|bölü|artı|eksi|kere|üssü|yüzde|kaç|eder|hesapla|nedir/gi, ''))) return `Sonuç ${c.toString().replace('.', ',')}`;
+  return null;
+}
+
+// ---------- LLM ----------
+function sysPrompt() {
+  const now = new Date().toLocaleString('tr-TR', { dateStyle: 'full', timeStyle: 'short' });
+  const open = tasks.filter(x => !x.done).map(x => x.t).join('; ') || 'yok';
+  return `Sen Iron Man filmlerindeki J.A.R.V.I.S. gibi zarif, esprili, kibar ve yetkin bir kişisel asistansın. Kullanıcıya "${cfg.name}" diye hitap et. Yanıtların Türkçe, sesli okunacağı için KISA (en fazla 2-3 cümle), düz metin olsun; madde işareti, markdown, emoji kullanma. Bilmediğin şeyi uydurma. Şu an: ${now}. Kullanıcının açık görevleri: ${open}.`;
+}
+async function askLLM(text) {
+  const p = cfg.prov; if (p === 'none') return `Bunu yapamıyorum ${cfg.name}. Yapay zeka sağlayıcısı kapalı; ayarlardan açabilirsiniz.`;
+  if (p !== 'custom' || /openai|openrouter/.test(cfg.base)) if (!cfg.key) return `Yapay zeka için API anahtarı gerekiyor ${cfg.name}. Ayarlardan ekleyebilirsiniz.`;
+  history.push({ r: 'user', c: text }); history = history.slice(-12);
+  const model = cfg.model || PROVIDERS[p].model; let out;
+  if (p === 'gemini') {
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.key },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: sysPrompt() }] }, contents: history.map(h => ({ role: h.r === 'user' ? 'user' : 'model', parts: [{ text: h.c }] })) })
+    });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status);
+    out = j.candidates?.[0]?.content?.parts?.map(x => x.text).join('') || '';
+  } else {
+    const base = (cfg.base || PROVIDERS[p].base).replace(/\/$/, '');
+    const r = await fetch(base + '/chat/completions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(cfg.key ? { Authorization: 'Bearer ' + cfg.key } : {}) },
+      body: JSON.stringify({ model, messages: [{ role: 'system', content: sysPrompt() }, ...history.map(h => ({ role: h.r, content: h.c }))] })
+    });
+    const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status);
+    out = j.choices?.[0]?.message?.content || '';
+  }
+  out = out.trim() || 'Cevap alamadım.';
+  history.push({ r: 'assistant', c: out }); store.set('hist', history);
+  return out;
+}
+
+// ---------- Main handler ----------
+let busy = false;
+async function handle(text) {
+  if (busy) return; busy = true;
+  say(text, 'me'); setState('think', 'düşünüyorum');
+  try {
+    let out = await local(text);
+    if (out == null) out = await askLLM(text);
+    await reply(out);
+  } catch (e) {
+    await reply('Bir sorun oluştu. ' + (/Failed to fetch|NetworkError/i.test(e.message) ? 'İnternet bağlantısını kontrol edin.' : String(e.message).slice(0, 140)));
+  } finally { busy = false; if (state === 'think') afterSpeak(); }
+}
+
+// ---------- Wiring ----------
+$('#form').addEventListener('submit', e => { e.preventDefault(); const v = $('#txt').value.trim(); if (v) { $('#txt').value = ''; synth?.cancel(); handle(v); } });
+$('#mic').addEventListener('click', toggleMic);
+$('#reactor').addEventListener('click', () => { synth?.cancel(); toggleMic(); });
+$('#cfgBtn').addEventListener('click', () => {
+  $('#cName').value = cfg.name; $('#cProv').value = cfg.prov; $('#cKey').value = cfg.key; $('#cModel').value = cfg.model; $('#cBase').value = cfg.base;
+  $('#cWake').value = cfg.wake; $('#cRate').value = cfg.rate; provUI(); $('#cfg').showModal();
+});
+function provUI() {
+  const p = $('#cProv').value, d = PROVIDERS[p];
+  $('#provHelp').innerHTML = d.help; $('#cModel').placeholder = d.model || '—'; $('#baseWrap').style.display = p === 'custom' ? '' : 'none';
+  $('#cKey').disabled = $('#cModel').disabled = p === 'none';
+}
+$('#cProv').addEventListener('change', provUI);
+$('#cClose').addEventListener('click', () => $('#cfg').close());
+$('#cSave').addEventListener('click', () => {
+  cfg = { name: $('#cName').value.trim() || 'efendim', prov: $('#cProv').value, key: $('#cKey').value.trim(), model: $('#cModel').value.trim(), base: $('#cBase').value.trim(), wake: +$('#cWake').value, rate: +$('#cRate').value };
+  store.set('cfg', cfg); $('#cfg').close(); say('Ayarlar kaydedildi.', 'sys');
+});
+
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+setState('idle', 'hazır');
+{ const h = new Date().getHours(); say(`${h < 12 ? 'Günaydın' : h < 18 ? 'İyi günler' : 'İyi akşamlar'} ${cfg.name}. Sistemler çevrimiçi. Mikrofon düğmesine ya da reaktöre dokunup "Jarvis" diyerek bana ulaşabilirsiniz.`); }
+if (cfg.prov !== 'none' && !cfg.key && cfg.prov !== 'custom') say('Sohbet için ⚙ ayarlardan ücretsiz bir API anahtarı ekleyin. Anahtarsız da yerel komutlar çalışır.', 'sys');
+</script>
+</body>
+</html>
