@@ -1,0 +1,10 @@
+{
+  "port": 3000,
+  "token": "uzun-rastgele-bir-parola",
+  "name": "efendim",
+  "city": "İstanbul",
+  "prov": "gemini",
+  "key": "GEMINI_ANAHTARINIZ",
+  "model": "",
+  "base": ""
+}

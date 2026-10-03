@@ -346,13 +346,22 @@ async function askLLM(text) {
 }
 
 // ---------- Main handler ----------
-let busy = false;
+let busy = false, HOME = false;
+fetch('api/health').then(r => r.ok && r.text()).then(t => { if (t === 'ok') { HOME = true; $('#state').title = 'Ev sunucusuna bağlı'; say('Ev sunucusuna bağlandım. Notlar ve görevler tüm cihazlarda ortak.', 'sys'); } }).catch(() => {});
+const qp = new URLSearchParams(location.search); if (qp.get('token')) { store.set('token', qp.get('token')); window.history.replaceState(null, '', location.pathname); }
 async function handle(text) {
   if (busy) return; busy = true;
   say(text, 'me'); setState('think', 'düşünüyorum');
   try {
-    let out = await local(text);
-    if (out == null) out = await askLLM(text);
+    let out = null;
+    if (HOME) {
+      // Ev sunucusu varsa not/görev/sohbet orada tutulur; tarayıcıya özgü işler burada kalır
+      if (/zamanlayıcı|sayaç|alarm|hatırlat|youtube|google|harita|ekranı|konuşmayı|sohbeti/i.test(text)) out = await local(text);
+      if (out == null) out = await (await fetch('ask?token=' + encodeURIComponent(store.get('token', '')), { method: 'POST', body: JSON.stringify({ q: text }) })).text();
+    } else {
+      out = await local(text);
+      if (out == null) out = await askLLM(text);
+    }
     await reply(out);
   } catch (e) {
     await reply('Bir sorun oluştu. ' + (/Failed to fetch|NetworkError/i.test(e.message) ? 'İnternet bağlantısını kontrol edin.' : String(e.message).slice(0, 140)));
