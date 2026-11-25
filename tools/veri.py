@@ -175,10 +175,10 @@ def cmd_lig(lid):
             home = {r["id"]: r for r in t.get("home", [])}
             away = {r["id"]: r for r in t.get("away", [])}
             xg = {r["id"]: r for r in t.get("xg", [])}
-            print("sıra takım O G B M averaj P | ev G-B-M gol | dep G-B-M gol | xG xGA xPuan")
+            print("sıra takım O G B M averaj P | ev G-B-M gol | dep G-B-M gol | xG xGA xPuan şans(P-xP: + şanslı, - şanssız)")
             for r in t.get("all", []):
                 h, a, x = home.get(r["id"], {}), away.get(r["id"], {}), xg.get(r["id"], {})
-                xs = f"{x.get('xg', 0):.1f} {x.get('xgConceded', 0):.1f} {x.get('xPoints', 0):.1f}" if x else "-"
+                xs = f"{x.get('xg', 0):.1f} {x.get('xgConceded', 0):.1f} {x.get('xPoints', 0):.1f} {r.get('pts', 0) - x.get('xPoints', 0):+.1f}" if x else "-"
                 print(f"{r.get('idx')}. {r['name']} {r.get('played')} {r.get('wins')} {r.get('draws')} {r.get('losses')} {r.get('scoresStr')} {r.get('pts')} | "
                       f"{h.get('wins','-')}-{h.get('draws','-')}-{h.get('losses','-')} {h.get('scoresStr','')} | "
                       f"{a.get('wins','-')}-{a.get('draws','-')}-{a.get('losses','-')} {a.get('scoresStr','')} | {xs}")

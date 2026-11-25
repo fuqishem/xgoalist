@@ -205,6 +205,35 @@ def run(day, as_csv=False):
                         *[f"{x:.3f}" if x else "" for x in p], f"{o['o25']:.3f}", f"{o['mo25']:.3f}" if o["mo25"] else "",
                         f"{o['btts']:.3f}", o["az_veri"]])
         return
+    # --- Benham tarzı değer listesi: karışım olasılığı (model+piyasa)/2 ile EV, çeyrek Kelly
+    vals = []
+    for o in out:
+        if not o["p"]:
+            continue
+        for k, lab in enumerate(("MS1", "MSX", "MS2")):
+            try:
+                odd = float(o["odds"][k])
+            except Exception:
+                continue
+            pm = (o["m"][k] + o["p"][k]) / 2
+            vals.append((pm * odd - 1, o, lab, odd, pm))
+        if o["mo25"] and o["ou_odds"]:
+            for lab, pmod, pmk, odd in (("2.5 Üst", o["o25"], o["mo25"], o["ou_odds"][0]), ("2.5 Alt", 1 - o["o25"], 1 - o["mo25"], o["ou_odds"][1])):
+                try:
+                    odd = float(odd)
+                except Exception:
+                    continue
+                pm = (pmod + pmk) / 2
+                vals.append((pm * odd - 1, o, lab, odd, pm))
+    vals = [v for v in vals if v[0] >= 0.03 and not v[1]["az_veri"]]
+    vals.sort(key=lambda v: -v[0])
+    if not as_csv:
+        print("# DEĞER LİSTESİ (Benham: yalnızca EV>+%3; olasılık = %50 model + %50 marjsız piyasa; pay = çeyrek Kelly, kasanın %'si)")
+        for ev, o, lab, odd, pm in vals[:25]:
+            b = odd - 1
+            kelly = max(0.0, (b * pm - (1 - pm)) / b) / 4
+            print(f"  {o['saat']} | {o['lig']} | {o['mac']} | {lab} @ {odd:.2f} | olasılık %{pm * 100:.0f} (adil {1 / pm:.2f}) | EV {ev * 100:+.1f}% | pay %{kelly * 100:.1f}")
+        print()
     print(f"# {len(out)} maç modellendi ({len(fixtures)} maçtan; kapsanan ligler: {len(fitted)})")
     print("saat | lig | maç | beklenen gol | MODEL 1/X/2 | PİYASA 1/X/2 | edge 1/X/2 | 2.5Ü model/piyasa | KG model | adil oran (karışım) 1/X/2")
     for o in out:
@@ -268,6 +297,22 @@ def istat(code, home_q, away_q, n=10):
             print(f"## Hakem {ref}: {len(rm)} maç, maç başı sarı {y:.2f}, kırmızı {rr:.2f}")
 
 
+def kapanis(day):
+    """Kapanış oranları (CLV kontrolü): football-data bu sezon CSV'lerinden o günün maçları.
+    PSC* = Pinnacle kapanış, AvgC* = ortalama kapanış. Bizim aldığımız oran kapanıştan yüksekse CLV pozitif."""
+    d = dt.date.fromisoformat(day)
+    for code in sorted(set(MAIN.values())):
+        txt = veri.get(f"https://www.football-data.co.uk/mmz4281/{season_codes(d)[0]}/{code}.csv").lstrip("﻿")
+        for r in csv.DictReader(io.StringIO(txt)):
+            try:
+                if dt.datetime.strptime(r["Date"], "%d/%m/%Y").date() != d:
+                    continue
+            except Exception:
+                continue
+            print(f"{code} | {r['HomeTeam']} {r.get('FTHG','')}-{r.get('FTAG','')} {r['AwayTeam']} | kapanış ort 1/X/2 {r.get('AvgCH','')} {r.get('AvgCD','')} {r.get('AvgCA','')}"
+                  f" | Pinnacle {r.get('PSCH','')} {r.get('PSCD','')} {r.get('PSCA','')} | 2.5Ü/A kapanış {r.get('AvgC>2.5','')} {r.get('AvgC<2.5','')}")
+
+
 def dusen():
     """betexplorer: son 24 saatte en çok düşen oranlar (bugün ve yarın)."""
     import html as H, re
@@ -287,5 +332,7 @@ if __name__ == "__main__":
         istat(sys.argv[2], sys.argv[3], sys.argv[4])
     elif sys.argv[1] == "dusen":
         dusen()
+    elif sys.argv[1] == "kapanis":
+        kapanis(sys.argv[2])
     else:
         run(sys.argv[1], "--csv" in sys.argv)
