@@ -2,9 +2,9 @@
 
 | Bölüm | Gün | Tutan kupon | Tekil seçim isabeti |
 |-------|-----|-------------|---------------------|
-| 1) Günün 10 maçı | 3 | 0/3 | 21/30 (%70) |
-| 2) 3 x 10 oran | 3 | 1/9 | 26/45 (%58) |
-| 3) Bahis sihirbazı | 3 | 2/9 maç | 2/9 |
+| 1) Günün 10 maçı | 4 | 0/4 | 26/40 (%65) |
+| 2) 3 x 10 oran | 4 | 3/12 | 38/61 (%62) |
+| 3) Bahis sihirbazı | 4 | 3/12 maç | 3/12 |
 | 4) Basket | 1 | 0/1 | 2/4 (+1 bekliyor) |
 
 ## Pazar tipi
@@ -38,3 +38,5 @@ Toplam: yatırılan 5.0, dönen 4.56, ROI −%9 (5 bahis; anlamlı sonuç için 
 
 - (25.11) Bet builder 0/3: "dev favori + KG + Üst" üç maçta da bir ayaktan yattı (favori ya berabere kaldı ya gol yemedi). BB'de 3 ayak yerine 2 güçlü ayak + 1 oyuncu/korner pazarı dene.
 - (25.11) Çifte şans yine iyi (4/4). EuroLeague'de deplasman favorileri (Dubai, Efes) yattı.
+- (26.11) Kupon A ve B tuttu (Avrupa kupaları, SM tahmini + sakatlık verisiyle seçilen deplasman/ev favorileri 11/11). Kupon C (düşük bilgili ligler) yine yattı → düşük bilgili kuponu bırak, bilgisi bol maçlarla kur.
+- (26.11) "MS1 & 3.5 Alt" iki maçta da yattı (0-0, 4-0); bu kombinasyonu kullanma. 10'luk listede 4 ayak 1.30-1.35 favoriden yattı: 10 ayaklı kupon matematiksel olarak zor (Benham uyarısı).
